@@ -3,9 +3,6 @@ import numpy as np
 import tkinter as tk
 from tkinter import ttk, colorchooser
 from PIL import Image, ImageTk
-import threading
-import time
-
 
 class GreenScreenApp:
     def __init__(self, root):
@@ -13,44 +10,45 @@ class GreenScreenApp:
         self.root.title("Green Screen Color Keying")
         self.root.geometry("1060x500")
 
-        # Initialize camera
+        # Kamera
         self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
             print("Error: Could not open camera")
             return
 
-        # Set camera resolution
+        # Rozdzielczosc kamery
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-        # Default color to key out (green)
+        # domyslny kolor zielony
         self.key_color = [0, 255, 0]  # BGR format
         self.tolerance = 50
+        self.feather = 21
         self.running = False
-        self.current_frame = None  # Store current frame for color picking
-        self.color_picking_mode = False  # Track if we're in color picking mode
+        self.current_frame = None  # aktywna klata dla wyboru koloru
+        self.color_picking_mode = False  # czy w trybie wybierania
 
-        # Background image (white by default)
+        # obrazek tla - bialy domyslnie
         self.background = np.ones((480, 640, 3), dtype=np.uint8) * 255
 
         self.setup_gui()
         self.start_camera()
 
     def setup_gui(self):
-        # Main frame
+        # glowny panel
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-        # Left: Video display
+        # lewy panel - kamera
         self.video_label = ttk.Label(main_frame)
         self.video_label.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(0, 10))
         self.video_label.bind("<Button-1>", self.on_frame_click)
 
-        # Right: Settings panel
+        # prawy panel - ustawienia
         settings_frame = ttk.Frame(main_frame)
         settings_frame.grid(row=0, column=1, sticky=(tk.N, tk.S, tk.W, tk.E))
 
-        # Color selection frame
+        # panel koloru
         color_frame = ttk.LabelFrame(settings_frame, text="Color Selection", padding="10")
         color_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -72,7 +70,7 @@ class GreenScreenApp:
 
         self.update_color_button()
 
-        # Tolerance adjustment frame
+        # panel tolerancji
         tolerance_frame = ttk.LabelFrame(settings_frame, text="Tolerance Settings", padding="10")
         tolerance_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -85,7 +83,16 @@ class GreenScreenApp:
         self.tolerance_label = ttk.Label(tolerance_frame, text=str(self.tolerance))
         self.tolerance_label.grid(row=0, column=2)
 
-        # Background options frame
+        self.feather_var = tk.IntVar(value=self.feather)
+        self.feather_slider = ttk.Scale(tolerance_frame, from_=1, to=50,
+                                        variable=self.feather_var, orient=tk.HORIZONTAL,
+                                        length=200, command=self.update_feather)
+        self.feather_slider.grid(row=1, column=1, padx=(0, 10))
+        ttk.Label(tolerance_frame, text="Feather:").grid(row=1, column=0, padx=(0, 10))
+        self.feather_label = ttk.Label(tolerance_frame, text=str(self.feather))
+        self.feather_label.grid(row=1, column=2)
+
+        # panel tla
         bg_frame = ttk.LabelFrame(settings_frame, text="Background Options", padding="10")
         bg_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -96,7 +103,7 @@ class GreenScreenApp:
         ttk.Button(bg_frame, text="Load Background Image",
                    command=self.load_background).grid(row=0, column=2)
 
-        # Control buttons
+        # panel przycisków
         control_frame = ttk.Frame(settings_frame)
         control_frame.pack(pady=(10, 0))
 
@@ -106,16 +113,16 @@ class GreenScreenApp:
         ttk.Button(control_frame, text="Exit", command=self.cleanup_and_exit).grid(row=0, column=2)
 
     def select_color(self):
-        """Open color picker dialog"""
+        # okno wyboru koloru
         color = colorchooser.askcolor(title="Select color to key out")
-        if color[0]:  # If color was selected
-            # Convert RGB to BGR for OpenCV
+        if color[0]:
+            # RGB do BGR
             rgb = color[0]
             self.key_color = [int(rgb[2]), int(rgb[1]), int(rgb[0])]
             self.update_color_button()
 
     def toggle_color_picking(self):
-        """Toggle color picking mode"""
+        # wlacz wybieranie koloru
         self.color_picking_mode = not self.color_picking_mode
         if self.color_picking_mode:
             self.pick_from_frame_button.configure(text="Cancel Picking", bg='orange')
@@ -125,61 +132,61 @@ class GreenScreenApp:
             self.instruction_label.configure(text="")
 
     def on_frame_click(self, event):
-        """Handle click on camera frame to pick color"""
+        # sprawdź tryb pobierania koloru i dostępność klatki
         if not self.color_picking_mode or self.current_frame is None:
             return
 
-        # Get click coordinates
+        # współrzędne kliknięcia w Label
         x, y = event.x, event.y
 
-        # Get frame dimensions and label dimensions
+        # wymiary Label i klatki
         if hasattr(self.video_label, 'image') and self.video_label.image:
-            # Calculate scaling factor between displayed image and actual frame
             label_width = self.video_label.winfo_width()
             label_height = self.video_label.winfo_height()
             frame_height, frame_width = self.current_frame.shape[:2]
 
-            # Convert click coordinates to frame coordinates
+            # przelicz współrzędne kliknięcia na klatkę
             if label_width > 0 and label_height > 0:
                 frame_x = int((x / label_width) * frame_width)
                 frame_y = int((y / label_height) * frame_height)
 
-                # Ensure coordinates are within frame bounds
+                # ogranicz współrzędne
                 frame_x = max(0, min(frame_x, frame_width - 1))
                 frame_y = max(0, min(frame_y, frame_height - 1))
 
-                # Get BGR color at clicked position
+                # pobierz kolor BGR z klatki
                 bgr_color = self.current_frame[frame_y, frame_x]
                 self.key_color = [int(bgr_color[0]), int(bgr_color[1]), int(bgr_color[2])]
 
-                # Update UI
+                # aktualizuj GUI i wyłącz tryb
                 self.update_color_button()
-                self.toggle_color_picking()  # Exit color picking mode
+                self.toggle_color_picking()
 
     def update_color_button(self):
-        """Update the color button and display"""
-        # Convert BGR to RGB for display
         rgb_color = f"#{self.key_color[2]:02x}{self.key_color[1]:02x}{self.key_color[0]:02x}"
         self.color_button.configure(bg=rgb_color)
         self.color_display.configure(bg=rgb_color)
 
     def update_tolerance(self, value):
-        """Update tolerance value from slider"""
         self.tolerance = int(float(value))
         self.tolerance_label.configure(text=str(self.tolerance))
 
+    def update_feather(self, value):
+        self.feather = max(1, int(float(value)))
+        if self.feather % 2 == 0:
+            self.feather += 1  # Kernel size must be odd
+        self.feather_label.config(text=str(self.feather))
+
     def set_white_background(self):
-        """Set background to white"""
         height, width = 480, 640
         self.background = np.ones((height, width, 3), dtype=np.uint8) * 255
 
     def set_black_background(self):
-        """Set background to black"""
         height, width = 480, 640
         self.background = np.zeros((height, width, 3), dtype=np.uint8)
 
     def load_background(self):
-        """Load custom background image"""
+        # zaladuj tlo z pliku
         from tkinter import filedialog
         file_path = filedialog.askopenfilename(
             title="Select background image",
@@ -188,17 +195,19 @@ class GreenScreenApp:
         if file_path:
             bg_img = cv2.imread(file_path)
             if bg_img is not None:
-                # Resize to match camera resolution
+                # dopasuj rozdzielczosc
                 self.background = cv2.resize(bg_img, (640, 480))
 
     def create_mask(self, frame):
-        """Create improved mask for color keying"""
+        # konwersja na HSV
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         key_hsv = cv2.cvtColor(np.uint8([[self.key_color]]), cv2.COLOR_BGR2HSV)[0][0]
 
+        # odczyt wartości H, S, V
         h, s, v = int(key_hsv[0]), int(key_hsv[1]), int(key_hsv[2])
         tolerance = self.tolerance
 
+        # zakres dolny i górny
         lower_bound = np.array([
             max(0, h - tolerance // 2),
             max(0, s - tolerance),
@@ -210,86 +219,87 @@ class GreenScreenApp:
             min(255, v + tolerance)
         ], dtype=np.uint8)
 
+        # maska binaryjna
         mask = cv2.inRange(hsv, lower_bound, upper_bound)
 
-        # Morphological cleaning
+        # operacje morfologiczne
         kernel_close = np.ones((5, 5), np.uint8)
         kernel_open = np.ones((3, 3), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close, iterations=2)
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open, iterations=1)
 
-        # Feather (strong blur to smooth edges)
-        mask = cv2.GaussianBlur(mask, (21, 21), 0)
+        # feathering (rozmycie)
+        feather = self.feather if hasattr(self, 'feather') else 21
+        if feather % 2 == 0:
+            feather += 1  # rozmiar kernela nieparzysty
+
+        mask = cv2.GaussianBlur(mask, (feather, feather), 0)
 
         return mask
 
     def apply_green_screen(self, frame):
-        """Apply green screen effect"""
-        # Create mask
+        # utwórz maskę
         mask = self.create_mask(frame)
 
-        # Normalize mask to 0-1 range
+        # normalizacja maski do 0-1
         mask_norm = mask.astype(float) / 255
 
-        # Create inverse mask
+        # maska odwrotna
         mask_inv = 1.0 - mask_norm
 
-        # Apply green screen effect
+        # wynikowy obraz
         result = np.zeros_like(frame)
-        for i in range(3):  # For each color channel
+        for i in range(3):  # kanały kolorów
             result[:, :, i] = (frame[:, :, i] * mask_inv +
                                self.background[:, :, i] * mask_norm)
 
         return result.astype(np.uint8)
 
     def update_frame(self):
-        """Update video frame"""
+        # sprawdź, czy kamera działa
         if not self.running:
             return
 
+        # odczyt klatki
         ret, frame = self.cap.read()
         if ret:
-            # Store current frame for color picking
+            # zapisz klatkę do pobierania koloru
             self.current_frame = frame.copy()
 
-            # Apply green screen effect (only if not in color picking mode)
+            # sprawdź tryb pobierania koloru
             if self.color_picking_mode:
-                processed_frame = frame  # Show original frame for color picking
+                processed_frame = frame  # oryginał
             else:
                 processed_frame = self.apply_green_screen(frame)
 
-            # Convert BGR to RGB for Tkinter
+            # konwersja BGR -> RGB
             rgb_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
 
-            # Convert to PIL Image and then to PhotoImage
+            # konwersja do PIL
             pil_image = Image.fromarray(rgb_frame)
             photo = ImageTk.PhotoImage(image=pil_image)
 
-            # Update label
+            # aktualizuj etykietę
             self.video_label.configure(image=photo)
-            self.video_label.image = photo  # Keep a reference
+            self.video_label.image = photo  # referencja
 
-        # Schedule next update
+        # zaplanuj kolejne odświeżenie
         self.root.after(30, self.update_frame)  # ~33 FPS
 
     def start_camera(self):
-        """Start camera capture"""
         self.running = True
         self.update_frame()
 
     def stop_camera(self):
-        """Stop camera capture"""
         self.running = False
 
     def toggle_camera(self):
-        """Toggle camera on/off"""
         if self.running:
             self.stop_camera()
         else:
             self.start_camera()
 
     def reset_settings(self):
-        """Reset all settings to default"""
         self.key_color = [0, 255, 0]  # Green
         self.tolerance = 50
         self.tolerance_var.set(self.tolerance)
@@ -301,7 +311,6 @@ class GreenScreenApp:
             self.toggle_color_picking()
 
     def cleanup_and_exit(self):
-        """Clean up resources and exit"""
         self.running = False
         if self.cap.isOpened():
             self.cap.release()
